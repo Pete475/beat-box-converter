@@ -158,7 +158,18 @@ const useAudioEngine = (selectedStyle: string) => {
     });
 
     // Create a download link for the .mid file
-    const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
+    // 1. Get the raw array from the MIDI object
+    const midiArray = midi.toArray();
+
+    // 2. Explicitly convert to a standard ArrayBuffer
+    // This strips away the 'SharedArrayBuffer' ambiguity causing the Vercel crash
+    const buffer = midiArray.buffer.slice(
+      midiArray.byteOffset,
+      midiArray.byteOffset + midiArray.byteLength,
+    );
+
+    // 3. Create the blob using the sliced buffer
+    const blob = new Blob([buffer], { type: 'audio/midi' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
