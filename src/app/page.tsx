@@ -5,11 +5,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import useAudioEngine from '../hooks/useAudioEngine';
 import Recorder from '../components/Recorder';
 import StyleSelector from '../components/StyleSelector';
+import DemoDisplay from '../components/DemoBeats';
 
 export default function Home() {
   const [selectedStyle, setSelectedStyle] = useState('808');
-  const { isRecording, startRecording, stopRecording, reset, detectedBpm } =
-    useAudioEngine(selectedStyle);
+  const {
+    isRecording,
+    startRecording,
+    stopRecording,
+    reset,
+    exportMidi,
+    detectedBpm,
+  } = useAudioEngine(selectedStyle);
 
   return (
     <main className='min-h-screen bg-black text-white flex flex-col items-center justify-center p-4'>
@@ -20,6 +27,23 @@ export default function Home() {
             {selectedStyle} Kit
           </div>
         </header>
+
+        <DemoDisplay />
+
+        <div className='px-8 py-3 bg-blue-500/5 border-b border-zinc-800'>
+          <p className='text-[11px] text-zinc-400 leading-relaxed'>
+            <span className='text-blue-400 font-bold mr-2'>PRO TIP:</span>
+            <br />
+
+            <span className='text-white'>
+              Don't just sing! (Ppppuh puh Tssst)
+              <br />
+              Bang on your desk for a kick & clap your hands for a snare
+              <br />
+              That will get you the cleanest takes
+            </span>
+          </p>
+        </div>
 
         <Recorder
           isRecording={isRecording}
@@ -55,6 +79,12 @@ export default function Home() {
                   <path d='M3 3v5h5' />
                 </svg>
                 <span>Reset Session</span>
+                <button
+                  onClick={exportMidi}
+                  className='flex items-center space-x-2 px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-500 transition-colors text-white text-xs font-bold uppercase tracking-widest'
+                >
+                  <span>Export MIDI</span>
+                </button>
               </button>
             </motion.div>
           )}

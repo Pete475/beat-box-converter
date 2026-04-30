@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as Tone from 'tone';
 import { analyze } from 'web-audio-beat-detector';
+import { Midi } from '@tonejs/midi';
 
 // Define a clear interface for our drum kit
 interface DrumKit {
@@ -126,6 +127,45 @@ const useAudioEngine = (selectedStyle: string) => {
     return trimmedBuffer;
   };
 
+  const lastKickTimes = useRef<number[]>([]);
+  const lastSnareTimes = useRef<number[]>([]);
+
+  const exportMidi = useCallback(() => {
+    if (!detectedBpm) return;
+
+    const midi = new Midi();
+    midi.header.setTempo(detectedBpm);
+
+    const track = midi.addTrack();
+    track.name = 'BeatScript Drums';
+
+    // Add Kicks (Note 36)
+    lastKickTimes.current.forEach((time) => {
+      track.addNote({
+        midi: 36,
+        time: time,
+        duration: 0.2,
+      });
+    });
+
+    // Add Snares (Note 38)
+    lastSnareTimes.current.forEach((time) => {
+      track.addNote({
+        midi: 38,
+        time: time,
+        duration: 0.2,
+      });
+    });
+
+    // Create a download link for the .mid file
+    const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `beat-${selectedStyle}.mid`;
+    link.click();
+  }, [detectedBpm, selectedStyle]);
+
   const processAudio = useCallback(async () => {
     if (audioChunks.current.length === 0) return;
 
@@ -149,6 +189,9 @@ const useAudioEngine = (selectedStyle: string) => {
 
     const kickTimes = await getTimestamps(audioBuffer, 'low');
     const snareTimes = await getTimestamps(audioBuffer, 'high');
+
+    lastKickTimes.current = kickTimes;
+    lastSnareTimes.current = snareTimes;
 
     const transport = Tone.getTransport();
     transport.stop().cancel();
@@ -195,7 +238,15 @@ const useAudioEngine = (selectedStyle: string) => {
 
   const startRecording = async () => {
     await Tone.start();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Ask the phone to stop trying to "help" with the audio
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
     mediaRecorder.current = new MediaRecorder(stream);
     audioChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) =>
@@ -224,6 +275,7 @@ const useAudioEngine = (selectedStyle: string) => {
     stopRecording,
     detectedBpm,
     reset,
+    exportMidi,
   };
 };
 

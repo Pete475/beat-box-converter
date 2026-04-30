@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@magenta/music": "^1.23.1",
+    "@tonejs/midi": "^2.0.28",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.12.0",
     "next": "16.2.4",
