@@ -38,9 +38,9 @@ export default function Home() {
             <span className='text-white'>
               Don't just sing! (Ppppuh puh Tssst)
               <br />
-              Bang on your desk for a kick & clap your hands for a snare
+              For cleanest takes:
               <br />
-              That will get you the cleanest takes
+              Bang on your desk for a kick & snap your fingers for a snare
             </span>
           </p>
         </div>
