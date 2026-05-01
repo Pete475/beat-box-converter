@@ -14,19 +14,15 @@ const useAudioEngine = (selectedStyle: string) => {
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
 
-  // Replace 'any' with our DrumKit interface
   const kit = useRef<DrumKit | null>(null);
+  const lastKickTimes = useRef<number[]>([]);
+  const lastSnareTimes = useRef<number[]>([]);
 
   const initKit = useCallback(() => {
-    // If the kit already exists, dispose of old synths to prevent memory leaks
     if (kit.current) {
       kit.current.players.dispose();
     }
 
-    const is808 = selectedStyle === '808';
-
-    // Explicitly type the new synths
-    // Map styles to your public/samples folder paths
     const stylePaths: Record<string, { kick: string; snare: string }> = {
       '808': { kick: '/samples/808/kick.wav', snare: '/samples/808/snare.wav' },
       handperc: {
@@ -52,7 +48,7 @@ const useAudioEngine = (selectedStyle: string) => {
 
   useEffect(() => {
     initKit();
-  }, [selectedStyle, initKit]);
+  }, [initKit]);
 
   const getTimestamps = async (buffer: AudioBuffer, type: 'low' | 'high') => {
     const offlineCtx = new OfflineAudioContext(
@@ -91,7 +87,6 @@ const useAudioEngine = (selectedStyle: string) => {
     let start = 0;
     let end = samples.length;
 
-    // Find the first sample above threshold
     for (let i = 0; i < samples.length; i++) {
       if (Math.abs(samples[i]) > threshold) {
         start = i;
@@ -99,7 +94,6 @@ const useAudioEngine = (selectedStyle: string) => {
       }
     }
 
-    // Find the last sample above threshold
     for (let i = samples.length - 1; i >= 0; i--) {
       if (Math.abs(samples[i]) > threshold) {
         end = i;
@@ -107,7 +101,6 @@ const useAudioEngine = (selectedStyle: string) => {
       }
     }
 
-    // If the clip is silent or too short to trim, return the original
     if (start >= end) return buffer;
 
     const trimmedLength = end - start;
@@ -117,7 +110,6 @@ const useAudioEngine = (selectedStyle: string) => {
       buffer.sampleRate,
     );
 
-    // Copy data from the original buffer to the new one
     for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
       const channelData = buffer.getChannelData(channel);
       const newChannelData = trimmedBuffer.getChannelData(channel);
@@ -126,9 +118,6 @@ const useAudioEngine = (selectedStyle: string) => {
 
     return trimmedBuffer;
   };
-
-  const lastKickTimes = useRef<number[]>([]);
-  const lastSnareTimes = useRef<number[]>([]);
 
   const exportMidi = useCallback(() => {
     if (!detectedBpm) return;
@@ -139,31 +128,18 @@ const useAudioEngine = (selectedStyle: string) => {
     const track = midi.addTrack();
     track.name = 'BeatScript Drums';
 
-    // Add Kicks (Note 36)
     lastKickTimes.current.forEach((time) => {
-      track.addNote({
-        midi: 36,
-        time: time,
-        duration: 0.2,
-      });
+      track.addNote({ midi: 36, time: time, duration: 0.2 });
     });
 
-    // Add Snares (Note 38)
     lastSnareTimes.current.forEach((time) => {
-      track.addNote({
-        midi: 38,
-        time: time,
-        duration: 0.2,
-      });
+      track.addNote({ midi: 38, time: time, duration: 0.2 });
     });
 
-    // Create a download link for the .mid file
-    // 1. Get the raw array from the MIDI object
     const midiArray = midi.toArray();
-
-    // 2. The Nuclear Option: Tell Vercel to look the other way
-    // @ts-expect-error - Uint8Array is compatible with BlobPart in practice
-    const blob = new Blob([midiArray], { type: 'audio/midi' });
+    // THE VERCEL FIX: Cast to any to bypass strict BlobPart checks
+    const blobPart: any = midiArray;
+    const blob = new Blob([blobPart], { type: 'audio/midi' });
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -175,7 +151,6 @@ const useAudioEngine = (selectedStyle: string) => {
   const processAudio = useCallback(async () => {
     if (audioChunks.current.length === 0) return;
 
-    // Ensure samples are loaded before playing
     await Tone.loaded();
 
     const blob = new Blob(audioChunks.current, { type: 'audio/wav' });
@@ -191,6 +166,7 @@ const useAudioEngine = (selectedStyle: string) => {
       Tone.getTransport().bpm.value = tempo;
     } catch (e) {
       console.warn('BPM fail');
+      setDetectedBpm(120);
     }
 
     const kickTimes = await getTimestamps(audioBuffer, 'low');
@@ -208,7 +184,6 @@ const useAudioEngine = (selectedStyle: string) => {
       Math.ceil(lastHit / (sixteenth * 16)) * (sixteenth * 16) ||
       sixteenth * 16;
 
-    // 2. Schedule the SAMPLES instead of synths
     kickTimes.forEach((t) => {
       const qt = Math.round(t / sixteenth) * sixteenth;
       transport.schedule((time) => {
@@ -226,26 +201,21 @@ const useAudioEngine = (selectedStyle: string) => {
     transport.loop = true;
     transport.loopEnd = loopLength;
     transport.start();
-  }, [initKit]);
+  }, [getTimestamps]);
 
   const reset = useCallback(() => {
-    // 1. Stop the audio engine
     const transport = Tone.getTransport();
     transport.stop();
     transport.cancel();
     transport.loop = false;
 
-    // 2. Clear the UI state
     setDetectedBpm(null);
     audioChunks.current = [];
-
     console.log('Engine reset. Ready for new input.');
   }, []);
 
   const startRecording = async () => {
     await Tone.start();
-
-    // Ask the phone to stop trying to "help" with the audio
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
