@@ -10,6 +10,7 @@ interface DrumKit {
 
 const useAudioEngine = (selectedStyle: string) => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [detectedBpm, setDetectedBpm] = useState<number | null>(null);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -19,10 +20,6 @@ const useAudioEngine = (selectedStyle: string) => {
   const lastSnareTimes = useRef<number[]>([]);
 
   const initKit = useCallback(() => {
-    if (kit.current) {
-      kit.current.players.dispose();
-    }
-
     const stylePaths: Record<string, { kick: string; snare: string }> = {
       '808': { kick: '/samples/808/kick.wav', snare: '/samples/808/snare.wav' },
       handperc: {
@@ -38,13 +35,21 @@ const useAudioEngine = (selectedStyle: string) => {
 
     const paths = stylePaths[selectedStyle] || stylePaths['808'];
 
-    const players = new Tone.Players({
+    const newPlayers = new Tone.Players({
       kick: paths.kick,
       snare: paths.snare,
     }).toDestination();
 
-    kit.current = { players };
-  }, [selectedStyle]);
+    // Wait for the new samples to actually load before swapping
+    Tone.loaded().then(() => {
+      // Only swap and dispose once the files are actually in memory
+      if (kit.current) {
+        kit.current.players.dispose();
+      }
+      kit.current = { players: newPlayers };
+      console.log('Kit swapped to:', selectedStyle);
+    });
+  }, [selectedStyle]); // The brackets were likely displaced before
 
   useEffect(() => {
     initKit();
@@ -151,56 +156,61 @@ const useAudioEngine = (selectedStyle: string) => {
   const processAudio = useCallback(async () => {
     if (audioChunks.current.length === 0) return;
 
-    await Tone.loaded();
-
-    const blob = new Blob(audioChunks.current, { type: 'audio/wav' });
-    const arrayBuffer = await blob.arrayBuffer();
-    const audioContext = Tone.getContext().rawContext as AudioContext;
-    const rawBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    const audioBuffer = trimSilence(rawBuffer);
-
-    let tempo = 120;
+    setIsProcessing(true); // Lock engine
     try {
-      tempo = await analyze(audioBuffer);
-      setDetectedBpm(Math.round(tempo));
-      Tone.getTransport().bpm.value = tempo;
-    } catch (e) {
-      console.warn('BPM fail');
-      setDetectedBpm(120);
+      await Tone.loaded();
+      const blob = new Blob(audioChunks.current, { type: 'audio/wav' });
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioContext = Tone.getContext().rawContext as AudioContext;
+      const rawBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      const audioBuffer = trimSilence(rawBuffer);
+
+      let tempo = 120;
+      try {
+        tempo = await analyze(audioBuffer);
+        setDetectedBpm(Math.round(tempo));
+        Tone.getTransport().bpm.value = tempo;
+      } catch (e) {
+        setDetectedBpm(120);
+      }
+
+      const kickTimes = await getTimestamps(audioBuffer, 'low');
+      const snareTimes = await getTimestamps(audioBuffer, 'high');
+
+      lastKickTimes.current = kickTimes;
+      lastSnareTimes.current = snareTimes;
+
+      const transport = Tone.getTransport();
+      transport.stop().cancel();
+
+      const sixteenth = 60 / tempo / 4;
+      const lastHit = Math.max(...kickTimes, ...snareTimes, 0);
+      const loopLength =
+        Math.ceil(lastHit / (sixteenth * 16)) * (sixteenth * 16) ||
+        sixteenth * 16;
+
+      kickTimes.forEach((t) => {
+        const qt = Math.round(t / sixteenth) * sixteenth;
+        transport.schedule((time) => {
+          kit.current?.players.player('kick').start(time);
+        }, qt);
+      });
+
+      snareTimes.forEach((t) => {
+        const qt = Math.round(t / sixteenth) * sixteenth;
+        transport.schedule((time) => {
+          kit.current?.players.player('snare').start(time);
+        }, qt);
+      });
+
+      transport.loop = true;
+      transport.loopEnd = loopLength;
+      transport.start();
+    } catch (err) {
+      console.error('Processing failed', err);
+    } finally {
+      setIsProcessing(false); // Release lock
     }
-
-    const kickTimes = await getTimestamps(audioBuffer, 'low');
-    const snareTimes = await getTimestamps(audioBuffer, 'high');
-
-    lastKickTimes.current = kickTimes;
-    lastSnareTimes.current = snareTimes;
-
-    const transport = Tone.getTransport();
-    transport.stop().cancel();
-
-    const sixteenth = 60 / tempo / 4;
-    const lastHit = Math.max(...kickTimes, ...snareTimes, 0);
-    const loopLength =
-      Math.ceil(lastHit / (sixteenth * 16)) * (sixteenth * 16) ||
-      sixteenth * 16;
-
-    kickTimes.forEach((t) => {
-      const qt = Math.round(t / sixteenth) * sixteenth;
-      transport.schedule((time) => {
-        kit.current?.players.player('kick').start(time);
-      }, qt);
-    });
-
-    snareTimes.forEach((t) => {
-      const qt = Math.round(t / sixteenth) * sixteenth;
-      transport.schedule((time) => {
-        kit.current?.players.player('snare').start(time);
-      }, qt);
-    });
-
-    transport.loop = true;
-    transport.loopEnd = loopLength;
-    transport.start();
   }, [getTimestamps]);
 
   const reset = useCallback(() => {
@@ -215,27 +225,38 @@ const useAudioEngine = (selectedStyle: string) => {
   }, []);
 
   const startRecording = async () => {
-    await Tone.start();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    });
-    mediaRecorder.current = new MediaRecorder(stream);
-    audioChunks.current = [];
-    mediaRecorder.current.ondataavailable = (e) =>
-      audioChunks.current.push(e.data);
-    mediaRecorder.current.onstop = processAudio;
-    mediaRecorder.current.start();
-    setIsRecording(true);
+    // 1. Debounce/Lock Check
+    if (isRecording || isProcessing) return;
+
+    try {
+      await Tone.start();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+
+      mediaRecorder.current = new MediaRecorder(stream);
+      audioChunks.current = [];
+
+      mediaRecorder.current.ondataavailable = (e) =>
+        audioChunks.current.push(e.data);
+      mediaRecorder.current.onstop = processAudio;
+
+      mediaRecorder.current.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Could not start recording', err);
+    }
   };
 
   const stopRecording = () => {
     if (mediaRecorder.current && isRecording) {
       mediaRecorder.current.stop();
       setIsRecording(false);
+      // Clean up the mic tracks immediately
       mediaRecorder.current.stream.getTracks().forEach((t) => t.stop());
     }
   };
@@ -246,6 +267,7 @@ const useAudioEngine = (selectedStyle: string) => {
 
   return {
     isRecording,
+    isProcessing,
     startRecording,
     stopPlayback,
     stopRecording,

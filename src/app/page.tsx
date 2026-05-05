@@ -22,7 +22,7 @@ export default function Home() {
     <main className='min-h-screen bg-black text-white flex flex-col items-center justify-center p-4'>
       <div className='max-w-md w-full border border-zinc-800 bg-zinc-900/50 rounded-3xl backdrop-blur-xl shadow-2xl overflow-hidden'>
         <header className='p-8 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80'>
-          <h1 className='text-xl font-bold tracking-tight'>BeatScript</h1>
+          <h1 className='text-xl font-bold tracking-tight'>BeatBoxConverter</h1>
           <div className='px-3 py-1 bg-zinc-800 rounded-full text-[10px] uppercase font-bold text-zinc-400'>
             {selectedStyle} Kit
           </div>
@@ -36,9 +36,7 @@ export default function Home() {
             <br />
 
             <span className='text-white'>
-              Don't just sing! (Ppppuh puh Tssst)
-              <br />
-              For cleanest takes:
+              Don't just sing! (Ppppuh puh Tsst)
               <br />
               Bang on your desk for a kick & snap your fingers for a snare
             </span>
